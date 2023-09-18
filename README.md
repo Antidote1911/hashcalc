@@ -1,7 +1,6 @@
 # 🥧 Hashcalc
 
-![CI](https://github.com/dnaka91/wholesum/workflows/CI/badge.svg?branch=main)
-
+[![CI](https://github.com/Antidote1911/hashcalc/actions/workflows/ci.yml/badge.svg)](https://github.com/Antidote1911/hashcalc/actions/workflows/ci.yml)
 Collection of file hashing algorithms all bundled in a single tool.
 
 ## Build
