@@ -16,7 +16,7 @@ cargo build
 
 Run the binary with the `--help` flag to get detailed instructions.
 
-No argument give Blake3 hash by default :
+No argument return Blake3 hash by default :
 ```sh
 ./hashcalc myfile.mp4
 a73d16389457836d4239862102105cf08b31202e0e0fe35da9289fa722b2b66d  myfile.mp4
