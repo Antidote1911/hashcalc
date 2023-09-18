@@ -69,6 +69,6 @@ jobs:
       - name: Create SHA512 checksums
         run: sha512sum -b *.{gz,zip} > checksums.sha512
       - name: Upload checksums
-        run: gh release upload --clobber --repo "${{ github.repository }}" "${{ github.ref_name }}" checksums.{b2,sha256,sha512}{,.asc}
+        run: gh release upload --clobber --repo "${{ github.repository }}" "${{ github.ref_name }}" checksums.{b2,sha256,sha512}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
