@@ -7,8 +7,8 @@ use std::{
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use hashcalc::{hashfile::HashFile, Algorithm, Mode};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 #[derive(Parser)]
 #[command(about, author, version, arg_required_else_help(true))]
