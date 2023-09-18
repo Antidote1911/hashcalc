@@ -3,6 +3,8 @@
 [![CI](https://github.com/Antidote1911/hashcalc/actions/workflows/ci.yml/badge.svg)](https://github.com/Antidote1911/hashcalc/actions/workflows/ci.yml)
 Collection of file hashing algorithms all bundled in a single tool.
 
+Latest Windows, Linux or other release are [here](https://github.com/Antidote1911/hashcalc/releases/latest).
+
 ## Build
 
 Have the latest `rustup`, `rust` toolchain and `cargo` installed and run:
