@@ -1,6 +1,6 @@
 [package]
 name = "hashcalc"
-version = "0.2.8"
+version = "0.2.9"
 authors = ["Fabrice Corraire <antidote1911@gmail.com>"]
 edition = "2021"
 license = "AGPL-3.0-only"
