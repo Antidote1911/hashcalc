@@ -18,12 +18,22 @@ jobs:
         include:
           - name: Linux x86_64
             os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
             archive: tar.gz
+
           - name: Windows x86_64
             os: windows-latest
+            target: x86_64-pc-windows-msvc
             archive: zip
-          - name: macOS universal
+
+          - name: macOS aarch64
             os: macos-14
+            target: aarch64-apple-darwin
+            archive: tar.gz
+
+          - name: macOS x86_64
+            os: macos-14
+            target: x86_64-apple-darwin
             archive: tar.gz
 
     steps:
@@ -31,11 +41,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.name }}
+          key: ${{ matrix.target }}
 
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-22.04'
@@ -50,67 +60,34 @@ jobs:
             libssl-dev \
             libglib2.0-dev
 
-      - name: Build (Linux)
-        if: matrix.os == 'ubuntu-22.04'
+      - name: Build
         run: |
-          cargo build --release --bin hashcalc     --target x86_64-unknown-linux-gnu
-          cargo build --release --bin hashcalc-gui --target x86_64-unknown-linux-gnu
+          cargo build --release --bin hashcalc     --target ${{ matrix.target }}
+          cargo build --release --bin hashcalc-gui --target ${{ matrix.target }}
 
-      - name: Build (Windows)
-        if: matrix.os == 'windows-latest'
+      - name: Package (Unix)
+        if: matrix.os != 'windows-latest'
         run: |
-          cargo build --release --bin hashcalc     --target x86_64-pc-windows-msvc
-          cargo build --release --bin hashcalc-gui --target x86_64-pc-windows-msvc
-
-      - name: Build and create universal binaries (macOS)
-        if: matrix.os == 'macos-14'
-        run: |
-          cargo build --release --bin hashcalc     --target aarch64-apple-darwin
-          cargo build --release --bin hashcalc     --target x86_64-apple-darwin
-          cargo build --release --bin hashcalc-gui --target aarch64-apple-darwin
-          cargo build --release --bin hashcalc-gui --target x86_64-apple-darwin
-          mkdir universal
-          lipo -create \
-            target/aarch64-apple-darwin/release/hashcalc \
-            target/x86_64-apple-darwin/release/hashcalc \
-            -output universal/hashcalc
-          lipo -create \
-            target/aarch64-apple-darwin/release/hashcalc-gui \
-            target/x86_64-apple-darwin/release/hashcalc-gui \
-            -output universal/hashcalc-gui
-
-      - name: Package (Linux)
-        if: matrix.os == 'ubuntu-22.04'
-        run: |
-          dir="hashcalc-${{ github.ref_name }}-x86_64-unknown-linux-gnu"
+          dir="hashcalc-${{ github.ref_name }}-${{ matrix.target }}"
           mkdir "$dir"
-          cp target/x86_64-unknown-linux-gnu/release/hashcalc     "$dir/"
-          cp target/x86_64-unknown-linux-gnu/release/hashcalc-gui "$dir/"
+          cp "target/${{ matrix.target }}/release/hashcalc"     "$dir/"
+          cp "target/${{ matrix.target }}/release/hashcalc-gui" "$dir/"
           tar czf "$dir.tar.gz" "$dir"
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          $dir = "hashcalc-${{ github.ref_name }}-x86_64-pc-windows-msvc"
+          $dir = "hashcalc-${{ github.ref_name }}-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $dir | Out-Null
-          Copy-Item "target\x86_64-pc-windows-msvc\release\hashcalc.exe"     $dir\
-          Copy-Item "target\x86_64-pc-windows-msvc\release\hashcalc-gui.exe" $dir\
+          Copy-Item "target\${{ matrix.target }}\release\hashcalc.exe"     "$dir\"
+          Copy-Item "target\${{ matrix.target }}\release\hashcalc-gui.exe" "$dir\"
           Compress-Archive -Path $dir -DestinationPath "$dir.zip"
-
-      - name: Package (macOS)
-        if: matrix.os == 'macos-14'
-        run: |
-          dir="hashcalc-${{ github.ref_name }}-universal-apple-darwin"
-          mkdir "$dir"
-          cp universal/hashcalc     "$dir/"
-          cp universal/hashcalc-gui "$dir/"
-          tar czf "$dir.tar.gz" "$dir"
 
       - uses: actions/upload-artifact@v4
         with:
           name: hashcalc-${{ matrix.name }}
-          path: hashcalc-${{ github.ref_name }}-*.${{ matrix.archive }}
+          path: hashcalc-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
 
   release:
     name: Publish release
