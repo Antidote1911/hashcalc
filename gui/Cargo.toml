@@ -1,0 +1,16 @@
+[package]
+name = "hashcalc-gui"
+version = "0.2.9"
+authors = ["Fabrice Corraire <antidote1911@gmail.com>"]
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "hashcalc-gui"
+path = "src/main.rs"
+
+[dependencies]
+hashcalc-core = { path = "../core" }
+eframe = "0.34"
+rfd = "0.17"
+strum = { version = "0.28.0" }

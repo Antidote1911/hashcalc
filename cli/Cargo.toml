@@ -1,0 +1,19 @@
+[package]
+name = "hashcalc-cli"
+version = "0.2.9"
+authors = ["Fabrice Corraire <antidote1911@gmail.com>"]
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "hashcalc"
+path = "src/main.rs"
+
+[dependencies]
+hashcalc-core = { path = "../core", features = ["cli"] }
+anyhow = "1.0"
+clap = { version = "4.6.1", features = ["derive"] }
+clap_complete = "4.6.5"
+clap_mangen = "0.3.0"
+rayon = "1.10.0"
+strum = { version = "0.28.0", features = ["derive"] }

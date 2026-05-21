@@ -1,0 +1,10 @@
+/target
+.idea
+Cargo.lock
+target/
+node_modules/
+.env
+dist/
+__pycache__/
+.claude/
+.idea/

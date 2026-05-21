@@ -1,0 +1,32 @@
+[package]
+name = "hashcalc-core"
+version = "0.2.9"
+authors = ["Fabrice Corraire <antidote1911@gmail.com>"]
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[features]
+cli = ["dep:clap"]
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.6.1", features = ["derive"], optional = true }
+blake2 = "0.11.0-rc.6"
+blake3 = { version = "1.8.5", features = ["traits-preview"] }
+digest = "0.11.3"
+fsb = "0.2.0"
+gost94 = "0.11.0"
+groestl = "0.11.0"
+md-5 = "0.11.0"
+md2 = "0.11.0"
+md4 = "0.11.0"
+ripemd = "0.2.0"
+sha1 = "0.11.0"
+sha2 = "0.11.0"
+sha3 = "0.12.0"
+shabal = "0.5.0"
+sm3 = "0.5.0"
+streebog = "0.11.0"
+strum = { version = "0.28.0", features = ["derive"] }
+tiger = "0.3.0"
+whirlpool = "0.11.0"
