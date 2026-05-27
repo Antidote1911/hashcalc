@@ -2,5 +2,11 @@
 members = ["core", "cli", "gui"]
 resolver = "2"
 
+[workspace.package]
+version = "0.3.1"
+authors = ["Fabrice Corraire <antidote1911@gmail.com>"]
+edition = "2021"
+license = "AGPL-3.0-only"
+
 [profile.release]
 lto = true

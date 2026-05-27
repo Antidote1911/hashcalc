@@ -78,14 +78,20 @@ smart_add() {
 show_branch_banner() {
   local branch
   branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "HEAD détachée")
-  local dirty=""
-  git diff --quiet 2>/dev/null || dirty=" ${RED}●${RESET}"
+  local dirty="" dirty_visible=""
+  if ! git diff --quiet 2>/dev/null; then dirty=" ${RED}●${RESET}"; dirty_visible=" ●"; fi
   local remote
   remote=$(git remote get-url origin 2>/dev/null | sed 's/.*github.com[:/]//' | sed 's/\.git$//' || echo "")
 
+  local label="${branch}${dirty_visible}"
+  local pad=$(( 34 - ${#label} ))
+  (( pad < 0 )) && pad=0
+  local spaces
+  printf -v spaces '%*s' "$pad" ''
+
   echo ""
   echo -e "${BOLD}${BLUE}╔══════════════════════════════════════╗${RESET}"
-  printf "${BOLD}${BLUE}║${RESET}  🌿 %-34s${BOLD}${BLUE}║${RESET}\n" "${branch}${dirty@P}"
+  echo -e "${BOLD}${BLUE}║${RESET}  🌿 ${branch}${dirty}${spaces}${BOLD}${BLUE}║${RESET}"
   [[ -n "$remote" ]] && \
   printf "${BOLD}${BLUE}║${RESET}  📦 %-34s${BOLD}${BLUE}║${RESET}\n" "$remote"
   echo -e "${BOLD}${BLUE}╚══════════════════════════════════════╝${RESET}"
@@ -147,7 +153,7 @@ do_tag() {
   echo ""
   read -rp "$(echo -e "${YELLOW}? ${RESET}Nom du tag (ex: v1.2.3) : ")" tag
   [[ -z "$tag" ]] && { error "Nom vide — annulé."; return; }
-  if git rev-parse "$tag" &>/dev/null 2>&1; then
+  if git rev-parse "$tag" &>/dev/null; then
     error "Le tag '${tag}' existe déjà."; return
   fi
   read -rp "$(echo -e "${YELLOW}? ${RESET}Message du tag (vide = tag léger) : ")" tmsg
@@ -252,6 +258,7 @@ do_full_reset() {
   sep
   echo ""
   echo -e "${RED}Tape exactement${RESET} ${BOLD}RESET${RESET} ${RED}pour confirmer (ou Entrée pour annuler) :${RESET}"
+  local confirm_word
   read -rp "  → " confirm_word
   if [[ "$confirm_word" != "RESET" ]]; then
     warn "Annulé."
@@ -325,6 +332,7 @@ do_purge_large_file() {
 
   echo ""
   echo -e "${RED}Tape exactement${RESET} ${BOLD}PURGE${RESET} ${RED}pour confirmer (IRRÉVERSIBLE sur l'historique) :${RESET}"
+  local confirm_word
   read -rp "  → " confirm_word
   [[ "$confirm_word" != "PURGE" ]] && { warn "Annulé."; return; }
 
@@ -370,6 +378,111 @@ do_purge_large_file() {
   success "✅ Fichier purgé de l'historique. Le push devrait maintenant fonctionner."
 }
 
+# ── Release : bump Cargo.toml + commit + push + tag → GitHub Actions ─────────
+do_release() {
+  title "Release (commit + push + tag → GitHub Actions)"
+
+  local branch
+  branch=$(git rev-parse --abbrev-ref HEAD)
+
+  # ── Lecture de la version depuis le Cargo.toml racine ──
+  local cargo_toml
+  cargo_toml="$(git rev-parse --show-toplevel)/Cargo.toml"
+  if [[ ! -f "$cargo_toml" ]]; then
+    error "Cargo.toml introuvable à la racine du dépôt."; return
+  fi
+
+  local current_version
+  current_version=$(grep -m1 '^version\s*=' "$cargo_toml" | sed 's/.*"\(.*\)".*/\1/')
+  if [[ -z "$current_version" ]]; then
+    error "Impossible de lire la version dans Cargo.toml."; return
+  fi
+
+  info "Version actuelle (Cargo.toml) : ${BOLD}${current_version}${RESET}"
+
+  local major minor patch
+  IFS='.' read -r major minor patch <<< "$current_version"
+  local next_patch="${major}.${minor}.$((patch + 1))"
+  local next_minor="${major}.$((minor + 1)).0"
+  local next_major="$((major + 1)).0.0"
+
+  echo ""
+  echo -e "  Nouvelle version :"
+  echo -e "  ${BOLD}1${RESET}  Patch  ${GREEN}${next_patch}${RESET}"
+  echo -e "  ${BOLD}2${RESET}  Minor  ${GREEN}${next_minor}${RESET}"
+  echo -e "  ${BOLD}3${RESET}  Major  ${GREEN}${next_major}${RESET}"
+  echo -e "  ${BOLD}4${RESET}  Saisir manuellement"
+  echo ""
+
+  local vchoice new_version
+  read -rp "$(echo -e "${YELLOW}? ${RESET}Choix [1] : ")" vchoice
+  case "${vchoice:-1}" in
+    2) new_version="$next_minor" ;;
+    3) new_version="$next_major" ;;
+    4)
+      read -rp "$(echo -e "${YELLOW}? ${RESET}Version (ex: 1.2.3) : ")" new_version
+      [[ -z "$new_version" ]] && { error "Version vide — annulé."; return; } ;;
+    *) new_version="$next_patch" ;;
+  esac
+
+  local new_tag="v${new_version}"
+
+  if git rev-parse "$new_tag" &>/dev/null; then
+    error "Le tag '${new_tag}' existe déjà."; return
+  fi
+
+  echo ""
+  info "Mise à jour : ${BOLD}${current_version}${RESET} → ${BOLD}${GREEN}${new_version}${RESET}"
+  echo ""
+
+  # ── Étape 1 : mise à jour du Cargo.toml ──
+  # Remplace uniquement la première occurrence (workspace.package)
+  sed -i "0,/^version = \"${current_version}\"/s/^version = \"${current_version}\"/version = \"${new_version}\"/" "$cargo_toml"
+  success "Cargo.toml mis à jour."
+
+  # ── Étape 2 : stage + commit (version bump + tout changement en attente) ──
+  setup_gitignore
+  untrack_ignored
+  smart_add
+
+  local rel_msg
+  read -rp "$(echo -e "${YELLOW}? ${RESET}Message de commit [\"chore: release ${new_version}\"] : ")" rel_msg
+  rel_msg="${rel_msg:-chore: release ${new_version}}"
+  git commit -m "$rel_msg"
+  success "Commit : \"${rel_msg}\""
+
+  # ── Étape 3 : pull --rebase + push des commits ──
+  info "Pull --rebase depuis origin/${branch}..."
+  git pull --rebase origin "$branch"
+
+  info "Push des commits vers origin/${branch}..."
+  git push origin "$branch"
+  success "Commits pushés."
+
+  # ── Étape 4 : tag annoté ──
+  local tag_msg
+  read -rp "$(echo -e "${YELLOW}? ${RESET}Description du tag [\"Release ${new_version}\"] : ")" tag_msg
+  tag_msg="${tag_msg:-Release ${new_version}}"
+  git tag -a "$new_tag" -m "$tag_msg"
+  success "Tag annoté '${new_tag}' créé."
+
+  # ── Étape 5 : push du tag → déclenche GitHub Actions ──
+  info "Push du tag ${new_tag} → GitHub Actions..."
+  git push origin "$new_tag"
+  success "Tag '${new_tag}' pushé ✓"
+
+  local remote
+  remote=$(git remote get-url origin 2>/dev/null || echo "")
+  echo ""
+  if [[ -n "$remote" ]]; then
+    local repo
+    repo=$(echo "$remote" | sed 's/.*github.com[:/]//' | sed 's/\.git$//')
+    success "✅ Release ${new_tag} déclenchée → https://github.com/${repo}/actions"
+  else
+    success "✅ Release ${new_tag} terminée."
+  fi
+}
+
 # ── Menu interactif ───────────────────────────────────────────────────────────
 main_menu() {
   while true; do
@@ -384,12 +497,13 @@ main_menu() {
     fi
 
     echo -e "  ${BOLD}1${RESET}  Commit + Push            ${CYAN}← équivalent à ./git.sh \"msg\"${RESET}"
-    echo -e "  ${BOLD}2${RESET}  Créer & pusher un tag"
-    echo -e "  ${BOLD}3${RESET}  Pull / Synchroniser"
-    echo -e "  ${BOLD}4${RESET}  Branches"
-    echo -e "  ${BOLD}5${RESET}  Stash"
-    echo -e "  ${BOLD}6${RESET}  Historique (log)"
-    echo -e "  ${BOLD}7${RESET}  Status"
+    echo -e "  ${BOLD}2${RESET}  Release                  ${GREEN}← commit + push + tag → GitHub Actions${RESET}"
+    echo -e "  ${BOLD}3${RESET}  Créer & pusher un tag"
+    echo -e "  ${BOLD}4${RESET}  Pull / Synchroniser"
+    echo -e "  ${BOLD}5${RESET}  Branches"
+    echo -e "  ${BOLD}6${RESET}  Stash"
+    echo -e "  ${BOLD}7${RESET}  Historique (log)"
+    echo -e "  ${BOLD}8${RESET}  Status"
     echo -e "  ${BOLD}0${RESET}  Initialiser un nouveau dépôt"
     echo -e "  ${BOLD}r${RESET}  ${RED}Reset total${RESET} ${RED}(efface l'historique, garde les fichiers)${RESET}"
     echo -e "  ${BOLD}f${RESET}  ${YELLOW}Purger un fichier trop gros${RESET} ${YELLOW}(fichier >100MB rejeté par GitHub)${RESET}"
@@ -400,17 +514,18 @@ main_menu() {
     read -rp "$(echo -e "${YELLOW}➜ ${RESET}Choix : ")" choice
 
     case "$choice" in
-      1|2|3|4|5|6|7|r|R|f|F) require_git ;;
+      1|2|3|4|5|6|7|8|r|R|f|F) require_git ;;
     esac
 
     case "$choice" in
       1) commit_and_push "" ;;
-      2) do_tag ;;
-      3) do_pull ;;
-      4) do_branch ;;
-      5) do_stash ;;
-      6) do_log ;;
-      7) do_status ;;
+      2) do_release ;;
+      3) do_tag ;;
+      4) do_pull ;;
+      5) do_branch ;;
+      6) do_stash ;;
+      7) do_log ;;
+      8) do_status ;;
       0) do_init ;;
       r|R) do_full_reset ;;
       f|F) do_purge_large_file ;;
