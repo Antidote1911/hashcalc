@@ -49,8 +49,7 @@ jobs:
           cp packaging/hashcalc.desktop AppDir/
 
           # Minimal placeholder icon (matches Icon=hashcalc in .desktop)
-          convert -size 256x256 xc:'#2b5797' -fill white -gravity center \
-            -pointsize 60 -annotate 0 'HC' AppDir/hashcalc.png
+          convert -size 256x256 xc:'#2b5797' AppDir/hashcalc.png
 
           printf '#!/bin/sh\nexec "${APPDIR}/usr/bin/hashcalc" "$@"\n' \
             > AppDir/AppRun
