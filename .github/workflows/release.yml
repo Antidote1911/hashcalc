@@ -9,62 +9,120 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux x86_64
-            os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            rust_targets: x86_64-unknown-linux-gnu
-            archive: tar.gz
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
 
-          - name: Windows x86_64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            rust_targets: x86_64-pc-windows-msvc
-            archive: zip
+      - uses: dtolnay/rust-toolchain@stable
 
-          - name: macOS universal
-            os: macos-14
-            target: universal-apple-darwin
-            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
-            archive: tar.gz
+      - uses: Swatinem/rust-cache@v2
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libxkbcommon-dev libssl-dev \
+            libglib2.0-dev imagemagick libfuse2
+
+      - name: Build
+        run: cargo build --release --bin hashcalc
+
+      - name: Package tar.gz
+        run: |
+          VERSION="${{ github.ref_name }}"
+          tar czf "hashcalc-${VERSION}-linux.tar.gz" \
+            -C target/release hashcalc
+
+      - name: Build AppImage
+        run: |
+          VERSION="${{ github.ref_name }}"
+
+          wget -qO appimagetool \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool
+
+          mkdir -p AppDir/usr/bin
+          cp target/release/hashcalc AppDir/usr/bin/
+          cp packaging/hashcalc.desktop AppDir/
+
+          # Minimal placeholder icon (matches Icon=hashcalc in .desktop)
+          convert -size 256x256 xc:'#2b5797' -fill white -gravity center \
+            -pointsize 60 -annotate 0 'HC' AppDir/hashcalc.png
+
+          printf '#!/bin/sh\nexec "${APPDIR}/usr/bin/hashcalc" "$@"\n' \
+            > AppDir/AppRun
+          chmod +x AppDir/AppRun
+
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 \
+            ./appimagetool AppDir "hashcalc-${VERSION}-linux.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            hashcalc-*-linux.tar.gz
+            hashcalc-*-linux.AppImage
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.rust_targets }}
+          targets: x86_64-pc-windows-msvc
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
-
-      - name: Install Linux system dependencies
-        if: matrix.os == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libgtk-3-dev \
-            libxcb-render0-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev \
-            libxkbcommon-dev \
-            libssl-dev \
-            libglib2.0-dev
+          key: windows
 
       - name: Build
-        if: matrix.target != 'universal-apple-darwin'
-        run: |
-          cargo build --release --bin hashcalc --target ${{ matrix.target }}
+        run: cargo build --release --bin hashcalc --target x86_64-pc-windows-msvc
 
-      - name: Build (macOS universal)
-        if: matrix.target == 'universal-apple-darwin'
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $VERSION = "${{ github.ref_name }}"
+          Compress-Archive `
+            -Path "target\x86_64-pc-windows-msvc\release\hashcalc.exe" `
+            -DestinationPath "hashcalc-${VERSION}-win-portable.zip"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            /DAppVersion=$version `
+            "/DBinDir=${{ github.workspace }}\target\x86_64-pc-windows-msvc\release" `
+            "/O${{ github.workspace }}" `
+            packaging\hashcalc.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            hashcalc-*-win-setup.exe
+            hashcalc-*-win-portable.zip
+
+  build-macos:
+    name: Build macOS universal
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos
+
+      - name: Build universal binary
         run: |
           cargo build --release --bin hashcalc --target aarch64-apple-darwin
           cargo build --release --bin hashcalc --target x86_64-apple-darwin
@@ -74,47 +132,48 @@ jobs:
             target/x86_64-apple-darwin/release/hashcalc \
             -output target/universal-apple-darwin/release/hashcalc
 
-      - name: Package (Unix)
-        if: matrix.os != 'windows-latest'
+      - name: Package DMG
         run: |
-          dir="hashcalc-${{ github.ref_name }}-${{ matrix.target }}"
-          mkdir "$dir"
-          cp "target/${{ matrix.target }}/release/hashcalc" "$dir/"
-          tar czf "$dir.tar.gz" "$dir"
+          VERSION="${{ github.ref_name }}"
+          VERSION_NUM="${VERSION#v}"
 
-      - name: Package (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $dir = "hashcalc-${{ github.ref_name }}-${{ matrix.target }}"
-          New-Item -ItemType Directory -Path $dir | Out-Null
-          Copy-Item "target\${{ matrix.target }}\release\hashcalc.exe" "$dir\"
-          Compress-Archive -Path $dir -DestinationPath "$dir.zip"
+          mkdir -p HashCalc.app/Contents/MacOS
+          mkdir -p HashCalc.app/Contents/Resources
+          cp target/universal-apple-darwin/release/hashcalc \
+            HashCalc.app/Contents/MacOS/
 
-      - name: Build Installer (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $version = "${{ github.ref_name }}".TrimStart('v')
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
-            /DAppVersion=$version `
-            "/DBinDir=${{ github.workspace }}\target\${{ matrix.target }}\release" `
-            packaging\hashcalc.iss
+          cat > HashCalc.app/Contents/Info.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>hashcalc</string>
+            <key>CFBundleIdentifier</key><string>com.antidote1911.hashcalc</string>
+            <key>CFBundleName</key><string>HashCalc</string>
+            <key>CFBundleDisplayName</key><string>HashCalc</string>
+            <key>CFBundleVersion</key><string>${VERSION_NUM}</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION_NUM}</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+          </dict>
+          </plist>
+          EOF
+
+          hdiutil create \
+            -volname "HashCalc ${VERSION_NUM}" \
+            -srcfolder HashCalc.app \
+            -ov -format UDZO \
+            "hashcalc-${VERSION}-macos-universal.dmg"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: hashcalc-${{ matrix.name }}
-          path: hashcalc-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
-
-      - uses: actions/upload-artifact@v4
-        if: matrix.os == 'windows-latest'
-        with:
-          name: hashcalc-Windows-setup
-          path: hashcalc-*-win-setup.exe
+          name: macos-artifacts
+          path: hashcalc-*-macos-universal.dmg
 
   release:
     name: Publish release
-    needs: build
+    needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
