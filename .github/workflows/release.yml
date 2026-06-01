@@ -98,7 +98,7 @@ jobs:
           $version = "${{ github.ref_name }}".TrimStart('v')
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             /DAppVersion=$version `
-            /DBinDir="target\${{ matrix.target }}\release" `
+            "/DBinDir=${{ github.workspace }}\target\${{ matrix.target }}\release" `
             packaging\hashcalc.iss
 
       - uses: actions/upload-artifact@v4
