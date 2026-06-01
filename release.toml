@@ -11,3 +11,9 @@ replace = "pkgver={{version}}"
 file    = "packaging/PKGBUILD"
 search  = "pkgrel=.*"
 replace = "pkgrel=1"
+
+# Reset to SKIP — the CI job will compute the real hash after the tag is pushed.
+[[pre-release-replacements]]
+file    = "packaging/PKGBUILD"
+search  = "sha256sums=.*"
+replace = "sha256sums=('SKIP')"
