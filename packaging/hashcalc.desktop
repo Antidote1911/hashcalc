@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=HashCalc
+Comment=File hashing tool — GUI and CLI (50+ algorithms)
+Exec=hashcalc
+Icon=hashcalc
+Terminal=false
+Type=Application
+Categories=Utility;
+Keywords=hash;checksum;sha;blake;md5;

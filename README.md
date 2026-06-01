@@ -10,9 +10,9 @@ Latest releases for Windows, Linux and macOS are [here](https://github.com/Antid
 
 ```
 hashcalc/
-├── core/   # shared hashing library
-├── cli/    # hashcalc — command-line tool
-└── gui/    # hashcalc-gui — egui graphical interface
+├── core/       # shared hashing library
+├── gui/        # hashcalc — GUI + CLI binary (egui)
+└── packaging/  # Inno Setup (Windows) and PKGBUILD (Arch Linux)
 ```
 
 ## Supported algorithms
@@ -32,7 +32,7 @@ hashcalc/
 
 ## GUI
 
-`hashcalc-gui` is a native desktop application built with [egui](https://github.com/emilk/egui).
+`hashcalc` (without arguments) opens a native desktop application built with [egui](https://github.com/emilk/egui).
 
 - Drag-and-drop a file onto the window or click to browse
 - Select any algorithm from the full list via a dropdown
@@ -106,9 +106,7 @@ Install the latest stable [Rust toolchain](https://rustup.rs/) and run:
 cargo build --release
 ```
 
-This produces two binaries under `target/release/`:
-- `hashcalc` — CLI
-- `hashcalc-gui` — GUI
+This produces a single binary `target/release/hashcalc` that acts as both the GUI (no arguments) and the CLI (with arguments).
 
 ### Linux system dependencies
 
@@ -125,10 +123,7 @@ sudo apt-get install \
   libglib2.0-dev
 ```
 
-To build only the CLI without these dependencies:
-```sh
-cargo build --release --bin hashcalc
-```
+The GUI is always included in the binary; the system libraries above are required even for CLI-only use on Linux.
 
 ## License
 

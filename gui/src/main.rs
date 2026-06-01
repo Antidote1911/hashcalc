@@ -1,12 +1,188 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Arc};
+use std::{
+    fs::File,
+    io::{self, Result as IoResult, Write},
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+    sync::{mpsc, Arc},
+};
 
+use anyhow::Result;
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 use eframe::egui::{self, Color32, RichText, Stroke, StrokeKind, Vec2};
-use hashcalc_core::Algorithm;
+use hashcalc_core::{hashfile::HashFile, Algorithm, Mode};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use strum::IntoEnumIterator;
 
-fn main() -> eframe::Result {
+// ── CLI ──────────────────────────────────────────────────────────────────────
+
+#[derive(Parser)]
+#[command(about, author, version, arg_required_else_help(true))]
+struct Opt {
+    /// Text or binary mode.
+    #[arg(short, long, value_enum, default_value_t)]
+    mode: Mode,
+    /// Hashing algorithm.
+    #[arg(short, long, value_enum, default_value_t)]
+    algorithm: Algorithm,
+    /// Prepend each output line with the used hash algorithm.
+    #[arg(short, long)]
+    prefix: bool,
+    /// Files to hash. Directories are silently ignored.
+    files: Vec<PathBuf>,
+    #[command(subcommand)]
+    cmd: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Check hashes against their actual files.
+    Check {
+        /// File containing the list of hashes.
+        file: PathBuf,
+    },
+    /// Generate shell completions, writing them to stdout.
+    Completions {
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+    /// Generate man pages into the given directory.
+    Manpages {
+        dir: PathBuf,
+    },
+}
+
+const IS_A_DIRECTORY: i32 = 21;
+
+fn main() {
+    if std::env::args_os().len() <= 1 {
+        if let Err(e) = run_gui() {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    } else if let Err(e) = run_cli() {
+        eprintln!("{e}");
+        std::process::exit(1);
+    }
+}
+
+fn run_cli() -> Result<()> {
+    let opt = Opt::parse();
+
+    if let Some(cmd) = opt.cmd {
+        match cmd {
+            Command::Check { file } => verify_files(file),
+            Command::Completions { shell } => {
+                print_completions(shell);
+                Ok(())
+            }
+            Command::Manpages { dir } => print_manpages(&dir),
+        }
+    } else {
+        hash_files(opt)
+    }
+}
+
+fn verify_files(file: PathBuf) -> Result<()> {
+    let hash_file = HashFile::parse(file)?;
+
+    let matches = hash_file
+        .entries
+        .into_par_iter()
+        .map(|entry| {
+            let hasher = entry
+                .algorithm
+                .or(hash_file.algorithm)
+                .unwrap_or(Algorithm::Blake3)
+                .into_hasher();
+
+            let hash = hasher(Path::new(&entry.file))?;
+
+            Ok((entry.file, hash == entry.hash))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let width = matches
+        .iter()
+        .map(|(file, _)| file.len())
+        .max()
+        .unwrap_or_default();
+
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+
+    for (file, valid) in matches {
+        writeln!(
+            stdout,
+            "{:width$} {}",
+            file,
+            if valid { "OK" } else { "ERR" },
+            width = width
+        )?;
+    }
+
+    stdout.flush()?;
+    Ok(())
+}
+
+fn print_completions(shell: Shell) {
+    clap_complete::generate(
+        shell,
+        &mut Opt::command(),
+        env!("CARGO_PKG_NAME"),
+        &mut io::stdout().lock(),
+    );
+}
+
+fn print_manpages(dir: &Path) -> Result<()> {
+    fn print(dir: &Path, app: &clap::Command) -> Result<()> {
+        let name = app.get_display_name().unwrap_or_else(|| app.get_name());
+        let mut out = File::create(dir.join(format!("{name}.1")))?;
+        clap_mangen::Man::new(app.clone()).render(&mut out)?;
+        out.flush()?;
+        for sub in app.get_subcommands() {
+            print(dir, sub)?;
+        }
+        Ok(())
+    }
+
+    let mut app = Opt::command();
+    app.build();
+    print(dir, &app)
+}
+
+fn hash_files(opt: Opt) -> Result<()> {
+    let hasher = opt.algorithm.into_hasher();
+
+    let mut hashes = opt
+        .files
+        .into_par_iter()
+        .filter_map(|file| match hasher(&file) {
+            Ok(hash) => Some(Ok((hash, file))),
+            Err(e) if e.raw_os_error() == Some(IS_A_DIRECTORY) => None,
+            Err(e) => Some(Err(e)),
+        })
+        .collect::<IoResult<Vec<_>>>()?;
+
+    hashes.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
+
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+
+    for (hash, path) in hashes {
+        if opt.prefix {
+            write!(stdout, "{} ", opt.algorithm)?;
+        }
+        writeln!(stdout, "{} {}{}", hash, opt.mode, path.display())?;
+    }
+
+    stdout.flush()?;
+    Ok(())
+}
+
+// ── GUI ──────────────────────────────────────────────────────────────────────
+
+fn run_gui() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([680.0, 400.0])
@@ -25,11 +201,8 @@ struct HashCalcApp {
     algorithm: Algorithm,
     hash_result: Option<String>,
     error: Option<String>,
-    /// Channel receiver for the background thread result.
     computing: Option<mpsc::Receiver<Result<String, String>>>,
-    /// Bytes processed by the current computation (new Arc each run).
     progress: Arc<AtomicU64>,
-    /// Total file size in bytes (0 = unknown).
     file_size: u64,
     dark_mode: bool,
 }
@@ -62,7 +235,6 @@ impl HashCalcApp {
             return;
         };
 
-        // Each run gets its own atomic so stale threads can't corrupt the new bar.
         let progress = Arc::new(AtomicU64::new(0));
         self.progress = Arc::clone(&progress);
         self.file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
@@ -91,8 +263,6 @@ impl HashCalcApp {
 }
 
 impl eframe::App for HashCalcApp {
-    // Called before ui() every frame — set visuals here so the CentralPanel
-    // background is drawn with the correct theme on the same frame.
     #[allow(deprecated)]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.set_visuals(if self.dark_mode {
@@ -102,8 +272,6 @@ impl eframe::App for HashCalcApp {
         });
     }
 
-    // Override the GPU clear color so the area behind egui panels is never
-    // left as the default near-black when switching to light mode.
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         if self.dark_mode {
             egui::Visuals::dark().panel_fill.to_normalized_gamma_f32()
@@ -115,7 +283,6 @@ impl eframe::App for HashCalcApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        // --- Poll background computation ---
         if let Some(rx) = &self.computing {
             match rx.try_recv() {
                 Ok(Ok(hash)) => {
@@ -135,7 +302,6 @@ impl eframe::App for HashCalcApp {
             }
         }
 
-        // --- Handle drag-and-drop ---
         ui.input(|i| {
             for file in &i.raw.dropped_files {
                 if let Some(path) = file.path.clone() {
@@ -146,8 +312,6 @@ impl eframe::App for HashCalcApp {
             }
         });
 
-        // Trigger computation when a file is dropped.
-        // (set_file clears computing, so this check is safe.)
         if self.file_path.is_some() && self.computing.is_none() && self.hash_result.is_none() && self.error.is_none() {
             self.start_hash(&ctx);
         }
@@ -155,7 +319,6 @@ impl eframe::App for HashCalcApp {
         let is_dragging = ui.input(|i| !i.raw.hovered_files.is_empty());
         let is_computing = self.computing.is_some();
 
-        // ── Header ──────────────────────────────────────────────────────────
         ui.horizontal(|ui| {
             ui.heading("HashCalc");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -172,7 +335,6 @@ impl eframe::App for HashCalcApp {
         ui.separator();
         ui.add_space(10.0);
 
-        // ── Algorithm selector ───────────────────────────────────────────────
         let prev_algorithm = self.algorithm;
         ui.horizontal(|ui| {
             ui.label("Algorithme :");
@@ -186,7 +348,6 @@ impl eframe::App for HashCalcApp {
                 });
         });
 
-        // Auto-trigger when the algorithm changes and a file is already loaded.
         if self.algorithm != prev_algorithm {
             if self.file_path.is_some() {
                 self.start_hash(&ctx);
@@ -195,7 +356,6 @@ impl eframe::App for HashCalcApp {
 
         ui.add_space(14.0);
 
-        // ── Drop zone ───────────────────────────────────────────────────────
         let available_width = ui.available_width();
         let (rect, response) =
             ui.allocate_exact_size(Vec2::new(available_width, 90.0), egui::Sense::click());
@@ -257,7 +417,6 @@ impl eframe::App for HashCalcApp {
 
         ui.add_space(6.0);
 
-        // Full path (small, muted)
         if let Some(path) = &self.file_path {
             ui.label(
                 RichText::new(path.display().to_string())
@@ -268,7 +427,6 @@ impl eframe::App for HashCalcApp {
 
         ui.add_space(10.0);
 
-        // ── Progress bar ────────────────────────────────────────────────────
         if is_computing {
             let fraction = self.progress_fraction();
             ui.add(
@@ -278,12 +436,10 @@ impl eframe::App for HashCalcApp {
             );
             ui.add_space(6.0);
         } else {
-            // Reserve the same vertical space to avoid layout jumps.
             ui.add_space(20.0);
             ui.add_space(6.0);
         }
 
-        // ── Hash result ─────────────────────────────────────────────────────
         if let Some(hash) = self.hash_result.clone() {
             ui.label(RichText::new("Résultat :").strong());
             ui.add_space(4.0);
@@ -299,12 +455,10 @@ impl eframe::App for HashCalcApp {
             });
         }
 
-        // ── Error ────────────────────────────────────────────────────────────
         if let Some(err) = &self.error {
             ui.colored_label(Color32::RED, format!("Erreur : {err}"));
         }
 
-        // ── Full-window drag overlay ─────────────────────────────────────────
         if is_dragging {
             if let Some(viewport) =
                 ctx.input(|i| i.viewport().inner_rect.or(i.viewport().outer_rect))

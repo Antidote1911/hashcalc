@@ -61,33 +61,25 @@ jobs:
       - name: Build
         if: matrix.target != 'universal-apple-darwin'
         run: |
-          cargo build --release --bin hashcalc     --target ${{ matrix.target }}
-          cargo build --release --bin hashcalc-gui --target ${{ matrix.target }}
+          cargo build --release --bin hashcalc --target ${{ matrix.target }}
 
       - name: Build (macOS universal)
         if: matrix.target == 'universal-apple-darwin'
         run: |
-          cargo build --release --bin hashcalc     --target aarch64-apple-darwin
-          cargo build --release --bin hashcalc-gui --target aarch64-apple-darwin
-          cargo build --release --bin hashcalc     --target x86_64-apple-darwin
-          cargo build --release --bin hashcalc-gui --target x86_64-apple-darwin
+          cargo build --release --bin hashcalc --target aarch64-apple-darwin
+          cargo build --release --bin hashcalc --target x86_64-apple-darwin
           mkdir -p target/universal-apple-darwin/release
           lipo -create \
             target/aarch64-apple-darwin/release/hashcalc \
             target/x86_64-apple-darwin/release/hashcalc \
             -output target/universal-apple-darwin/release/hashcalc
-          lipo -create \
-            target/aarch64-apple-darwin/release/hashcalc-gui \
-            target/x86_64-apple-darwin/release/hashcalc-gui \
-            -output target/universal-apple-darwin/release/hashcalc-gui
 
       - name: Package (Unix)
         if: matrix.os != 'windows-latest'
         run: |
           dir="hashcalc-${{ github.ref_name }}-${{ matrix.target }}"
           mkdir "$dir"
-          cp "target/${{ matrix.target }}/release/hashcalc"     "$dir/"
-          cp "target/${{ matrix.target }}/release/hashcalc-gui" "$dir/"
+          cp "target/${{ matrix.target }}/release/hashcalc" "$dir/"
           tar czf "$dir.tar.gz" "$dir"
 
       - name: Package (Windows)
@@ -96,8 +88,7 @@ jobs:
         run: |
           $dir = "hashcalc-${{ github.ref_name }}-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $dir | Out-Null
-          Copy-Item "target\${{ matrix.target }}\release\hashcalc.exe"     "$dir\"
-          Copy-Item "target\${{ matrix.target }}\release\hashcalc-gui.exe" "$dir\"
+          Copy-Item "target\${{ matrix.target }}\release\hashcalc.exe" "$dir\"
           Compress-Archive -Path $dir -DestinationPath "$dir.zip"
 
       - name: Build Installer (Windows)
@@ -108,7 +99,7 @@ jobs:
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             /DAppVersion=$version `
             /DBinDir="target\${{ matrix.target }}\release" `
-            installer\hashcalc.iss
+            packaging\hashcalc.iss
 
       - uses: actions/upload-artifact@v4
         with:

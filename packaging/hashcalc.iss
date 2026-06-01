@@ -29,16 +29,15 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "addtopath";   Description: "Add HashCalc to PATH (CLI)"; GroupDescription: "Additional options:"
+Name: "addtopath";   Description: "Add HashCalc to PATH"; GroupDescription: "Additional options:"
 
 [Files]
-Source: "{#BinDir}\hashcalc.exe";     DestDir: "{app}"; Flags: ignoreversion
-Source: "{#BinDir}\hashcalc-gui.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BinDir}\hashcalc.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\HashCalc GUI";                     Filename: "{app}\hashcalc-gui.exe"
+Name: "{group}\HashCalc";                         Filename: "{app}\hashcalc.exe"
 Name: "{group}\{cm:UninstallProgram,HashCalc}";   Filename: "{uninstallexe}"
-Name: "{autodesktop}\HashCalc GUI";               Filename: "{app}\hashcalc-gui.exe"; Tasks: desktopicon
+Name: "{autodesktop}\HashCalc";                   Filename: "{app}\hashcalc.exe"; Tasks: desktopicon
 
 [Registry]
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
@@ -62,6 +61,6 @@ begin
 end;
 
 [Run]
-Filename: "{app}\hashcalc-gui.exe"; \
-  Description: "{cm:LaunchProgram,HashCalc GUI}"; \
+Filename: "{app}\hashcalc.exe"; \
+  Description: "{cm:LaunchProgram,HashCalc}"; \
   Flags: nowait postinstall skipifsilent
