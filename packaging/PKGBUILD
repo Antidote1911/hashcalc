@@ -9,7 +9,7 @@ license=('AGPL-3.0-only')
 depends=('gcc-libs' 'glibc' 'gtk3' 'libxcb' 'libxkbcommon')
 makedepends=('cargo' 'pkgconf')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('dfb45ae4f97491dcc5f51297dfbbcfeb8708adaa539d0bcf4bd607dbbbfc6519')
+sha256sums=('58c3e0765ba72d7035f6e77c502c175d44bc2627a6051f67633813857ea04957')
 
 prepare() {
     cd "$pkgname-$pkgver"
