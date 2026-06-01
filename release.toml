@@ -1,0 +1,13 @@
+publish = false
+tag-name = "v{{version}}"
+pre-release-commit-message = "chore: release {{version}}"
+
+[[pre-release-replacements]]
+file    = "packaging/PKGBUILD"
+search  = "pkgver=.*"
+replace = "pkgver={{version}}"
+
+[[pre-release-replacements]]
+file    = "packaging/PKGBUILD"
+search  = "pkgrel=.*"
+replace = "pkgrel=1"
