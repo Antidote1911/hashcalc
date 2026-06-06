@@ -3,7 +3,7 @@ use std::{
     fs::File,
     io::{BufReader, Read, Result},
     path::Path,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 use digest::Digest;
@@ -178,6 +178,15 @@ impl Algorithm {
     pub fn into_hasher_with_progress(self) -> fn(&Path, &AtomicU64) -> Result<String> {
         dispatch!(self, hash_with_progress)
     }
+
+    /// Like `into_hasher_with_progress` but also accepts a cancellation flag.
+    /// The hasher checks `cancelled` at every chunk boundary (64 KiB); when it
+    /// is `true` the function stops immediately and returns `ErrorKind::Interrupted`.
+    pub fn into_hasher_cancellable(
+        self,
+    ) -> fn(&Path, &AtomicU64, &AtomicBool) -> Result<String> {
+        dispatch!(self, hash_cancellable)
+    }
 }
 
 fn hash<H: SimpleHasher>(input: &Path) -> Result<String> {
@@ -199,6 +208,31 @@ fn hash_with_progress<H: SimpleHasher>(input: &Path, progress: &AtomicU64) -> Re
     let mut hasher = H::new();
     let mut buf = vec![0u8; 1 << 16];
     loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        progress.fetch_add(n as u64, Ordering::Relaxed);
+    }
+    Ok(hasher.finalize())
+}
+
+fn hash_cancellable<H: SimpleHasher>(
+    input: &Path,
+    progress: &AtomicU64,
+    cancelled: &AtomicBool,
+) -> Result<String> {
+    let mut reader = BufReader::new(File::open(input)?);
+    let mut hasher = H::new();
+    let mut buf = vec![0u8; 1 << 16];
+    loop {
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "cancelled",
+            ));
+        }
         let n = reader.read(&mut buf)?;
         if n == 0 {
             break;

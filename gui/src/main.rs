@@ -2,7 +2,7 @@ use std::{
     fs::File,
     io::{self, Result as IoResult, Write},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     sync::{mpsc, Arc},
 };
 
@@ -203,8 +203,10 @@ struct HashCalcApp {
     error: Option<String>,
     computing: Option<mpsc::Receiver<Result<String, String>>>,
     progress: Arc<AtomicU64>,
+    cancelled: Arc<AtomicBool>,
     file_size: u64,
     dark_mode: bool,
+    stopped: bool,
 }
 
 impl Default for HashCalcApp {
@@ -216,8 +218,10 @@ impl Default for HashCalcApp {
             error: None,
             computing: None,
             progress: Arc::new(AtomicU64::new(0)),
+            cancelled: Arc::new(AtomicBool::new(false)),
             file_size: 0,
             dark_mode: true,
+            stopped: false,
         }
     }
 }
@@ -235,18 +239,24 @@ impl HashCalcApp {
             return;
         };
 
-        let progress = Arc::new(AtomicU64::new(0));
-        self.progress = Arc::clone(&progress);
+        // Cancel any in-flight computation (checked at every 64 KiB chunk).
+        self.cancelled.store(true, Ordering::Relaxed);
+
+        let progress  = Arc::new(AtomicU64::new(0));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        self.progress  = Arc::clone(&progress);
+        self.cancelled = Arc::clone(&cancelled);
         self.file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         self.hash_result = None;
         self.error = None;
+        self.stopped = false;
 
         let (tx, rx) = mpsc::channel();
-        let hasher = self.algorithm.into_hasher_with_progress();
+        let hasher = self.algorithm.into_hasher_cancellable();
         let ctx = ctx.clone();
 
         std::thread::spawn(move || {
-            let result = hasher(&path, &progress).map_err(|e| e.to_string());
+            let result = hasher(&path, &progress, &cancelled).map_err(|e| e.to_string());
             let _ = tx.send(result);
             ctx.request_repaint();
         });
@@ -312,7 +322,7 @@ impl eframe::App for HashCalcApp {
             }
         });
 
-        if self.file_path.is_some() && self.computing.is_none() && self.hash_result.is_none() && self.error.is_none() {
+        if self.file_path.is_some() && !self.stopped && self.computing.is_none() && self.hash_result.is_none() && self.error.is_none() {
             self.start_hash(&ctx);
         }
 
@@ -429,11 +439,18 @@ impl eframe::App for HashCalcApp {
 
         if is_computing {
             let fraction = self.progress_fraction();
-            ui.add(
-                egui::ProgressBar::new(fraction)
-                    .desired_width(available_width)
-                    .animate(fraction == 0.0),
-            );
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::ProgressBar::new(fraction)
+                        .desired_width(ui.available_width() - 64.0)
+                        .animate(fraction == 0.0),
+                );
+                if ui.button("⏹ Stop").clicked() {
+                    self.cancelled.store(true, Ordering::Relaxed);
+                    self.computing = None;
+                    self.stopped = true;
+                }
+            });
             ui.add_space(6.0);
         } else {
             ui.add_space(20.0);
